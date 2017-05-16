@@ -7,6 +7,7 @@ import time
 import json
 import serial
 import datetime
+import sched
 from base64 import b64encode, b64decode
 
 
@@ -108,25 +109,29 @@ def log_thread():
 	# TODO
 	# scan COM{n}
 	# capture log for each COM, select/poll?
-	ser = serial.Serial('COM4', 57600, timeout=60)
-	print(ser.name)
-	print(ser)
-	if not ser:
-		return
-	while True:
-		try:
-			print("<"+time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))+"> ", end="")
-			print(ser.readline().decode("utf8"), end="")
-			#time.sleep(1)
-		except serial.SerialException:
-			print('SerialException!')
-			ser.close()
-			#time.sleep(1)
+	try:
+		ser = serial.Serial('/dev/ttyS0', 57600, timeout=60)
+		print(ser.name)
+		print(ser)
+		while True:
+			try:
+				print("<"+time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))+"> ", end="")
+				print(ser.readline().decode("utf8"), end="")
+				#time.sleep(1)
+			except serial.SerialException:
+				print('SerialException!')
+				ser.close()
+				#time.sleep(1)
+	except Exception as e:
+		print("warning! unable to capture log from /dev/ttyS0!")
+		# raise e
+	finally:
+		pass
 
 
 class Logger():
-	def __init__(self, port, bitrate=57600, timeout=60, logpath="."):
-		self.port = port
+	def __init__(self, dev, bitrate=57600, timeout=60, logpath="."):
+		self.dev = dev
 		self.bitrate = bitrate
 		self.timeout = timeout
 		self.logpath = logpath
@@ -141,14 +146,30 @@ class Logger():
 	def stop_capture(self, mark=">"*32):
 		pass
 
-class Tester():
+
+class TestCase():
+	def __init__(self):
+		pass
+
+	def load_script():
+		ss = os.listdir(".")
+		scripts = []
+		for s in ss:
+			if s.match(r"\d{3}"):
+				scripts.append(s)
+
+		for i,s in enumerate(ss.sort()):
+			print(i, s)
+
+
+class TestInstance():
 	def __init__(self, swinfo):
 		self.script_path = "."
 		# register pwm
 		self.pwm = PowerManager(poweron, poweroff)
 
 		# register log
-		self.log = Logger(port="COM1", logpath=".")
+		self.log = Logger(dev="COM1", logpath=".")
 
 	def sanity_check(self):
 		# check if target device is online
@@ -159,6 +180,9 @@ class Tester():
 			print("the requested hw does not exist!"+firmware["hw"])
 			return False
 
+	def run(self, testcase):
+		pass
+
 
 def run_test(testcase):
 
@@ -168,11 +192,11 @@ def run_test(testcase):
 def post_report(testcase, result):
 	pass
 
-def tester(test):
+def test_thread(test):
 	testcases = load_test_case(test.script_path)
 	for testcase in testcases:
 		try:
-			report = run_test(testcase)
+			report = run_test_case(testcase)
 			if not report or not report.get("result"):
 				print("testcase failed!")
 			else:
@@ -186,9 +210,15 @@ def tester(test):
 
 
 class USock():
-	def __init__(self):
+	"""
+	why we need this class?
+	1. reliable tx/rx (require ack for each unicast datagram)
+	2. sending/receiving by chunk
+	"""
+	def __init__(self, addr='', port=8507):
 		self.CHUNK_SIZE = 512
 		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		self.sock.bind((addr, port))
 
 	def send_ack(self, data, addr):
 		ackmsg = {
@@ -214,7 +244,8 @@ class USock():
 
 
 	def broadcast(self, data):
-		self.sock.sendto(pack(ackmsg), "<broadcast>")
+		#self.sock.sendto(data, ("<broadcast>", 8507))
+		pass
 
 	def sendto(self, data, addr):
 		""" send data in CHUNK_SIZE and wait for ack if it is a unicast"""
@@ -274,15 +305,17 @@ def msg_thread(sock):
 #rxsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 #txsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-rxsock = USock()
-txsock = USock()
+mainsock = USock()
 
 pwm_thread = threading.Thread(target=pwm_thread, args=[], name="pwm")
 log_thread = threading.Thread(target=log_thread, args=[], name="log")
-msg_thread = threading.Thread(target=msg_thread, args=[rxsock], name="msg")
+msg_thread = threading.Thread(target=msg_thread, args=[mainsock], name="msg")
 
+print("msg_thread.start()!")
 msg_thread.start()
+print("pwm_thread.start()!")
 pwm_thread.start()
+print("log_thread.start()!")
 log_thread.start()
 
 # scan test sets
@@ -290,26 +323,59 @@ log_thread.start()
 test_sets = []
 
 
+# ping all partners, we will handle the responses in msg_thread
 msg = {
 	"id":1,
 	"from":"master",
 	"to":"all",
 	"type":"ping",
 }
+print("ping all partners!")
+mainsock.broadcast(pack(msg))
 
-i = txsock.broadcast(pack(msg))
+schedtask = sched.scheduler(time.time, time.sleep)
+def print_time(a='default'):
+    print("From print_time", time.time(), a)
+
+def print_some_times():
+    print(time.time())
+    schedtask.enter(10, 1, print_time)
+    schedtask.enter(5, 2, print_time, argument=('positional',))
+    schedtask.enter(5, 1, print_time, kwargs={'a': 'keyword'})
+    schedtask.run()
+    print(time.time())
+
+print_some_times()
 
 
 while True:
 	time.sleep(1)
+
+	# check if a new firmware is available
 	firmware = check_firmware()
 	if not firmware:
+		time.sleep()
 		continue
-
 	print("firmware update available")
 	print(firmware.get("chip"), firmware.get("url"))
 
-	threading.Thread(target=tester, args=[firmware], name="test-mt7620")
+	# check if corresponding target device is available
+
+	for target in test_sets:
+		if target.get("cpu") != firmware.get("cpu"):
+			continue
+		if target.busy():
+			print("target busy, postpone it.")
+			break
+	else:
+		print("target not available.")
+
+	print("start to test target "+str(target))
+
+	test = []
+	new_test = threading.Thread(target=test_thread, args=[firmware], name="test-mt7620")
+	test.append(new_test)
+	new_test.start()
 
 
 
