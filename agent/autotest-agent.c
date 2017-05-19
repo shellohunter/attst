@@ -288,69 +288,6 @@ __error:
     return NG;
 }
 
-void * hello(void * pvdata)
-{
-    int i = 0;
-    int counter = 0;
-    int tx_sock = -1;
-    int broadcast = 1;
-    char txbuf[512];
-
-    tx_sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if(tx_sock < -1)
-    {
-        LOG_ERROR("failed to create tx_sock. %s", strerror(errno));
-        exit(-1);
-    }
-
-    /* without this a socket cannot send broadcasting packet. */
-    i = setsockopt(tx_sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
-    if (i < 0)
-    {
-        LOG_ERROR("SO_BROADCAST fail. %s", strerror(errno));
-        exit(-1);
-    }
-
-    struct sockaddr_in txaddr;
-    memset (&txaddr, 0, sizeof(txaddr));
-    txaddr.sin_family = AF_INET;
-    txaddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-    txaddr.sin_port = htons (8508);
-
-    i = connect(tx_sock, (struct sockaddr *) &txaddr, sizeof(txaddr));
-    if(i < -1)
-    {
-        LOG_ERROR("failed to connect tx_sock. %s", strerror(errno));
-        exit(-1);
-    }
-
-    LOG_TRACE("tx_sock ready");
-
-    do
-    {
-        sprintf(txbuf,"%4d",counter++);
-        LOG_DEBUG("send \"%s\"", txbuf);
-        i = send(tx_sock, txbuf, strlen(txbuf), 0);
-        if(i != sizeof(txbuf))
-        {
-            LOG_ERROR("%s", strerror(errno));
-        }
-
-        sleep(1);
-
-    }
-    while (!__done__);
-
-    return NULL;
-}
-
-
-
-char * get_id()
-{
-    return "MT7621-0C0DEEFFAC";
-}
-
 
 int send_chunk(int sock, char * data, int len, int flag, struct sockaddr * addr, socklen_t addrlen)
 {
@@ -386,10 +323,6 @@ void * hi(void * pvdata)
     int i = 0;
     char * data;
     int len = 0;
-
-    agent->broadcast_addr.sin_family = AF_INET;
-    agent->broadcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-    agent->broadcast_addr.sin_port = htons (8507);
 
     LOG_DEBUG("hi thread start ... ");
     while(1)
@@ -702,7 +635,7 @@ int main(int argc, char ** argv)
         memset (&agent.masteraddr, 0, sizeof(agent.masteraddr));
         agent.masteraddr.sin_family = AF_INET;
         agent.masteraddr.sin_addr.s_addr = htonl(agent.master);
-        agent.masteraddr.sin_port = htons (8507);
+        agent.masteraddr.sin_port = htons (8508);
     }
 
     agent.sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -715,7 +648,7 @@ int main(int argc, char ** argv)
     struct sockaddr_in rxaddr;
     memset (&rxaddr, 0, sizeof(rxaddr));
     rxaddr.sin_family = AF_INET;
-    rxaddr.sin_addr.s_addr = htonl(agent.master);
+    rxaddr.sin_addr.s_addr = INADDR_ANY;
     rxaddr.sin_port = htons (8507);
 
     i = bind(agent.sock, (struct sockaddr *)&rxaddr, sizeof(rxaddr));
@@ -724,6 +657,13 @@ int main(int argc, char ** argv)
         LOG_ERROR("failed to bind agent.sock. %s", strerror(errno));
         exit(-1);
     }
+
+
+    agent.broadcast_addr.sin_family = AF_INET;
+    agent.broadcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    agent.broadcast_addr.sin_port = htons (8508);
+
+    sendto(agent.sock, rxbuf, 32, 0, (struct sockaddr *)&agent.broadcast_addr, sizeof(agent.broadcast_addr));
 
 #if 0
     LOG_TRACE("agent.sock ready");
@@ -762,15 +702,16 @@ int main(int argc, char ** argv)
         LOG_DEBUG("pthread create error %s.", strerror(errno));
     }
 
-
+    char ipbuf[1024];
     while (1)
     {
         FD_ZERO(&rxfds);
         FD_SET(agent.sock, &rxfds);
 
-        timeout.tv_sec = 5;
+        timeout.tv_sec = 60;
         timeout.tv_usec = 0;
 
+        LOG_TRACE("waiting for data");
         i = select(agent.sock + 1, &rxfds, NULL, NULL, &timeout);
         if (i < 0)
         {
@@ -783,13 +724,14 @@ int main(int argc, char ** argv)
 
         if (FD_ISSET(agent.sock, &rxfds))
         {
-            struct sockaddr src_addr;
+            struct sockaddr_in src_addr;
             socklen_t addrlen;
-            i = recvfrom(agent.sock, rxbuf, sizeof(rxbuf), 0, &src_addr, &addrlen);
+            i = recvfrom(agent.sock, rxbuf, sizeof(rxbuf), 0, (struct sockaddr *)&src_addr, &addrlen);
+            LOG_VERBOSE("got data from %s", inet_ntop(AF_INET, (struct sockaddr *)&src_addr.sin_addr, ipbuf, sizeof(ipbuf)));
+            hexdump("rxbuf", rxbuf, i);
             if (i > CHUNK_SIZE)
             {
                 LOG_ERROR("got something wrong?");
-                hexdump("rxbuf", rxbuf, i);
                 continue;
             }
 
@@ -826,7 +768,7 @@ int main(int argc, char ** argv)
                 }
 
                 /* acknowledge it first */
-                send_ack(data, len, agent.sock, &src_addr, addrlen);
+                send_ack(data, len, agent.sock, (struct sockaddr *)&src_addr, addrlen);
 
                 cache_clear(cache);
             }

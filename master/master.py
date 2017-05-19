@@ -215,7 +215,7 @@ class USock():
 	1. reliable tx/rx (require ack for each unicast datagram)
 	2. sending/receiving by chunk
 	"""
-	def __init__(self, addr='', port=8507):
+	def __init__(self, addr='', port=8508):
 		self.CHUNK_SIZE = 512
 		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		self.sock.bind((addr, port))
@@ -236,9 +236,10 @@ class USock():
 
 	def wait_ack(self, data, addr):
 		while True:
-			msg, addr = self.sock.recvfrom(CHUNK_SIZE)
+			print("wait for ack")
+			msg, addr = self.sock.recvfrom(self.CHUNK_SIZE)
 			jmsg = unpack(msg)
-			if jmsg and jmsg["type"] == ack and jmsg["data"] == data:
+			if jmsg and jmsg["type"] == "ack" and jmsg["data"] == data:
 				return True
 		return False
 
@@ -249,6 +250,7 @@ class USock():
 
 	def sendto(self, data, addr):
 		""" send data in CHUNK_SIZE and wait for ack if it is a unicast"""
+		print("send data to "+str(addr))
 		tmpdata = data
 		retry = 0
 		assert addr
@@ -256,11 +258,13 @@ class USock():
 		while len(tmpdata) > 0:
 			i = min(len(tmpdata), 512)
 			self.sock.sendto(tmpdata[0:i], addr)
-			self.wait_ack(tmpdata[0:i])
 			tmpdata = data[i:]
 
+		print("send done "+str(addr))
+		self.wait_ack(tmpdata[0:i], addr)
+
 	def recvfrom(self, bufsize = None):
-		msg, addr = self.sock.recvfrom()
+		msg, addr = self.sock.recvfrom(self.CHUNK_SIZE)
 		if len(msg) > self.CHUNK_SIZE:
 			print("msg size %d > CHUNK_SIZE %d"%(len(msg), self.CHUNK_SIZE))
 			return None
@@ -269,6 +273,7 @@ class USock():
 
 def msg_thread(sock):
 	while True:
+		print("msg thread!")
 		try:
 			msg, addr =sock.recvfrom(1024)
 			print("received %s from %s"%(str(msg), str(addr)))
@@ -286,13 +291,15 @@ def msg_thread(sock):
 			elif jmsg["type"] == "hi":
 				if jmsg["from"] != "agent":
 					continue
-				if jmsg[""]:
+				if True: #jmsg[""]:
 					himsg = {
 						"id":1,
 						"from":"master",
 						"to": str(addr),
 						"type":"hi",
 					}
+					print("got hi msg from agent " + str(addr))
+					print("say hi to agent " + str(addr))
 					sock.sendto(pack(himsg), addr)
 			# message handler
 		except Exception as e:

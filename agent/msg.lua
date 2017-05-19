@@ -41,6 +41,10 @@ if msg.type == "job" then
 		fp:close()
 		os.execute("sh /tmp/.autotest.tmp")
 	end
+elseif msg.type == "hi" then
+	if msg.from == "master" then
+		print("master said hi")
+	end
 else
 	print("msg type not supported yet!")
 end
