@@ -16,6 +16,17 @@
         2) flush function is called.
 */
 
+#ifndef ASSERT
+#define ASSERT(cond) \
+    do { \
+        if(!(cond)) \
+        { \
+            fprintf(stderr,"<assert> [%s] FAIL, %s L%d\n", #cond, __FUNCTION__, __LINE__); \
+            exit(-1); \
+        } \
+    } while(0)
+
+#endif
 
 typedef struct
 {

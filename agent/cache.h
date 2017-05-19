@@ -15,17 +15,6 @@
 //typedef void* handle;
 #endif
 
-#ifndef ASSERT
-#define ASSERT(cond) \
-    do { \
-        if(!(cond)) \
-        { \
-            fprintf(stderr,"<assert> [%s] FAIL, %s L%d\n", #cond, __FUNCTION__, __LINE__); \
-            exit(-1); \
-        } \
-    } while(0)
-
-#endif
 
 handle cache_create(void);
 void cache_destroy(handle hd);

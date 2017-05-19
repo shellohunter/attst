@@ -44,5 +44,5 @@ local msg = {
 
 local ok, jmsg = pcall(cjson.encode, msg)
 
-print(jmsg)
+-- print(jmsg)
 return jmsg

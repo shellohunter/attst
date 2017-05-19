@@ -6,7 +6,7 @@ exeobjs := autotest-agent.o cache.o
 all: $(exe)
 
 $(exe) : $(exeobjs)
-	$(CC) $(CFLAGS) -lpthread -llua -o $@ $^
+	$(CC) $(CFLAGS) -lpthread -llua -lssl -o $@ $^
 
 $(exeobjs): %.o : %.c
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
