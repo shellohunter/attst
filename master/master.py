@@ -1,4 +1,4 @@
-
+#!/usr/local/bin/python3
 
 import os
 import sys
@@ -9,6 +9,12 @@ import serial
 import datetime
 import sched
 from base64 import b64encode, b64decode
+import hashlib
+import traceback
+
+
+from usock import USock
+from testcase import TestCase
 
 
 __id__ = 0
@@ -29,60 +35,6 @@ def unpack(jsonbytes):
 		raise e
 
 
-
-def test():
-	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-	s2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-	s.bind(('', 8508))
-
-
-	try:
-		msg, addr =s.recvfrom(1024)
-		print("received %s from %s"%(str(msg), str(addr)))
-
-		time.sleep(1)
-
-		print("connecting to ", (addr[0], 8507))
-		s2.connect((addr[0], 8507))
-		print(s2)
-		print("send to ", (addr[0], 8507))
-
-		script1 = """
-	who;
-	mkdir -p /tmp/autotest;
-	echo hello autotest > /tmp/autotest/11111;
-	date > /tmp/autotest/22222;
-	ls /;
-	wget http://172.26.66.95/autobuild/openwrt-build-sanity-2017-05-10-16-45-43/openwrt-build-sanity-7620-7610/openwrt-build-sanity-7620-7610-bc4fc4a9-2017-05-10-16-45-44.bin -O /tmp/autotest/firmware.bin;
-	sleep 10;
-	echo job done;
-		"""
-
-		msg = {
-			"id": id(),
-			"type": "job",
-			"data": {
-				"type": "shell",
-				"data": script1
-			},
-			"feedback": "yes"
-		}
-
-		i = s2.send(pack(msg))
-		time.sleep(1)
-
-		i = s2.send(b"pack(msg)")
-		time.sleep(1)
-
-
-	except Exception as e:
-		print(e)
-		raise e
-	finally:
-		pass
-
-
 import subprocess
 import threading
 
@@ -90,7 +42,7 @@ import threading
 def dummy():
 	while True:
 		print("Hi I'm a dummy thread! My name is "+threading.current_thread().name)
-		time.sleep(5)
+		time.sleep(10)
 
 
 def check_firmware():
@@ -147,6 +99,7 @@ class Logger():
 		pass
 
 
+"""
 class TestCase():
 	def __init__(self):
 		pass
@@ -182,7 +135,7 @@ class TestInstance():
 
 	def run(self, testcase):
 		pass
-
+"""
 
 def run_test(testcase):
 
@@ -209,73 +162,20 @@ def test_thread(test):
 			pass
 
 
-class USock():
-	"""
-	why we need this class?
-	1. reliable tx/rx (require ack for each unicast datagram)
-	2. sending/receiving by chunk
-	"""
-	def __init__(self, addr='', port=8508):
-		self.CHUNK_SIZE = 512
-		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-		self.sock.bind((addr, port))
-
-	def send_ack(self, data, addr):
-		ackmsg = {
-			id:"",
-			"from":"master",
-			"to": str(addr),
-			"type":"ack",
-			"data": data
-		}
-
-		if not addr:
-			self.sock.sendto(pack(ackmsg), "<broadcast>")
-		else:
-			self.sock.sendto(pack(ackmsg), addr)
-
-	def wait_ack(self, data, addr):
-		while True:
-			print("wait for ack")
-			msg, addr = self.sock.recvfrom(self.CHUNK_SIZE)
-			jmsg = unpack(msg)
-			if jmsg and jmsg["type"] == "ack" and jmsg["data"] == data:
-				return True
-		return False
-
-
-	def broadcast(self, data):
-		#self.sock.sendto(data, ("<broadcast>", 8507))
-		pass
-
-	def sendto(self, data, addr):
-		""" send data in CHUNK_SIZE and wait for ack if it is a unicast"""
-		print("send data to "+str(addr))
-		tmpdata = data
-		retry = 0
-		assert addr
-
-		while len(tmpdata) > 0:
-			i = min(len(tmpdata), 512)
-			self.sock.sendto(tmpdata[0:i], addr)
-			tmpdata = data[i:]
-
-		print("send done "+str(addr))
-		self.wait_ack(tmpdata[0:i], addr)
-
-	def recvfrom(self, bufsize = None):
-		msg, addr = self.sock.recvfrom(self.CHUNK_SIZE)
-		if len(msg) > self.CHUNK_SIZE:
-			print("msg size %d > CHUNK_SIZE %d"%(len(msg), self.CHUNK_SIZE))
-			return None
-		return msg, addr
+class TestCase_Upgrade(TestCase):
+	def prepare(self):
+		print("TestCase_Upgrade.prepare")
+	def run(self):
+		print("TestCase_Upgrade.run")
+	def complete(self):
+		print("TestCase_Upgrade.complete")
 
 
 def msg_thread(sock):
 	while True:
 		print("msg thread!")
 		try:
-			msg, addr =sock.recvfrom(1024)
+			msg, addr =sock.recv()
 			print("received %s from %s"%(str(msg), str(addr)))
 
 			jmsg = unpack(msg)
@@ -298,9 +198,9 @@ def msg_thread(sock):
 						"to": str(addr),
 						"type":"hi",
 					}
-					print("got hi msg from agent " + str(addr))
-					print("say hi to agent " + str(addr))
-					sock.sendto(pack(himsg), addr)
+					print("got hi msg from agent ",addr)
+					print("say hi to agent ", addr[0], sock.AGENT_RXPORT)
+					sock.sendto(pack(himsg), (addr[0], sock.AGENT_RXPORT))
 			# message handler
 		except Exception as e:
 			print(e)

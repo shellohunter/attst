@@ -45,6 +45,10 @@ elseif msg.type == "hi" then
 	if msg.from == "master" then
 		print("master said hi")
 	end
+elseif msg.type == "ping" then
+	if msg.from == "master" then
+		print("master ping")
+	end
 else
 	print("msg type not supported yet!")
 end

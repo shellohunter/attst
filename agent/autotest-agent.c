@@ -36,7 +36,11 @@
 /* UDP supports various datagram length, but for better compatibility, we
  * always send data in 512 bytes chunks.
  */
-#define CHUNK_SIZE (512)
+#define CHUNK_SIZE (500)
+#define MASTER_TXPORT (65071)
+#define MASTER_RXPORT (65072)
+#define AGENT_TXPORT (65171)
+#define AGENT_RXPORT (65172)
 
 /* log level */
 enum
@@ -57,21 +61,21 @@ enum
     if (__loglvl__ >= LOG_LVL_TRACE) do { \
         fprintf(stderr, "<trace> "); \
         fprintf(stderr, __VA_ARGS__); \
-        fprintf(stderr, ". L%d, %s\n", __LINE__, __FILE__); \
+        fprintf(stderr, ". L%d, %s\n", __LINE__, __FUNCTION__); \
     } while(0)
 
 #define LOG_DEBUG(...) \
     if (__loglvl__ >= LOG_LVL_DEBUG) do { \
         fprintf(stderr, "<dbg> "); \
         fprintf(stderr, __VA_ARGS__); \
-        fprintf(stderr, ". L%d, %s\n", __LINE__, __FILE__); \
+        fprintf(stderr, ". L%d, %s\n", __LINE__, __FUNCTION__); \
     } while(0)
 
 #define LOG_ERROR(...) \
     if (__loglvl__ >= LOG_LVL_ERROR) do { \
         fprintf(stderr, "<error> "); \
         fprintf(stderr, __VA_ARGS__); \
-        fprintf(stderr, ". L%d, %s\n", __LINE__, __FILE__); \
+        fprintf(stderr, ". L%d, %s\n", __LINE__, __FUNCTION__); \
     } while(0)
 
 #define LOG_VERBOSE(...) \
@@ -103,9 +107,9 @@ enum
 typedef struct
 {
     int state;
-#if 0
-    int sock;
-    int sock;
+#if 1
+    int rxsock;
+    int txsock;
 #else
     int sock;
 #endif
@@ -329,7 +333,7 @@ void * hi(void * pvdata)
     {
 
         if (agent->state == INIT)
-            sleep(1);
+            sleep(5);
         else
             sleep(10);
 
@@ -346,7 +350,7 @@ void * hi(void * pvdata)
         hexdump("hi", data, len);
         LOG_DEBUG("hi \"%d\"", counter++);
 
-        i = send_chunk(agent->sock, data, len, 0,
+        i = send_chunk(agent->txsock, data, len, 0,
                        (struct sockaddr *)&agent->broadcast_addr, sizeof(agent->broadcast_addr));
         cache_clear(cache);
         if(i != len)
@@ -493,16 +497,16 @@ int send_ack(char * buf, int len, int sock, struct sockaddr * addr, socklen_t ad
     int i;
 
     MD5_Init(&ctx);
-    MD5_Update(&ctx, (void *)buf, strlen(buf));
+    MD5_Update(&ctx, (void *)buf, len);
     MD5_Final(md, &ctx);
 
     LOG_VERBOSE("md5: ");
     for(i = 0; i< MD5_DIGEST_LENGTH; i++)
         LOG_VERBOSE("%02x", md[i]);
-    LOG_VERBOSE("/n");
+    LOG_VERBOSE("\n");
 
     sendto(sock, md, sizeof(md), 0, addr, addrlen);
-
+    LOG_VERBOSE("ack sent!");
     return OK;
 }
 
@@ -571,7 +575,7 @@ int handle_message(Agent * agent, char * msg, int len)
 int main(int argc, char ** argv)
 {
     int i = 0;
-    int broadcast = 1;
+    int enable = 1;
     fd_set rxfds;
     char rxbuf[2048];
     struct timeval timeout;
@@ -638,10 +642,10 @@ int main(int argc, char ** argv)
         agent.masteraddr.sin_port = htons (8508);
     }
 
-    agent.sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if(agent.sock < -1)
+    agent.rxsock = socket(AF_INET, SOCK_DGRAM, 0);
+    if(agent.rxsock < -1)
     {
-        LOG_ERROR("failed to create agent.sock. %s", strerror(errno));
+        LOG_ERROR("failed to create agent.rxsock. %s", strerror(errno));
         exit(-1);
     }
 
@@ -649,51 +653,67 @@ int main(int argc, char ** argv)
     memset (&rxaddr, 0, sizeof(rxaddr));
     rxaddr.sin_family = AF_INET;
     rxaddr.sin_addr.s_addr = INADDR_ANY;
-    rxaddr.sin_port = htons (8507);
+    rxaddr.sin_port = htons (AGENT_RXPORT);
 
-    i = bind(agent.sock, (struct sockaddr *)&rxaddr, sizeof(rxaddr));
+    i = bind(agent.rxsock, (struct sockaddr *)&rxaddr, sizeof(rxaddr));
     if(i < -1)
     {
-        LOG_ERROR("failed to bind agent.sock. %s", strerror(errno));
+        LOG_ERROR("failed to bind agent.rxsock. %s", strerror(errno));
         exit(-1);
     }
 
+    i = setsockopt(agent.rxsock, IPPROTO_IP, IP_PKTINFO, &enable, sizeof(enable));
+    if (i < 0)
+    {
+        LOG_ERROR("IP_PKTINFO fail. %s", strerror(errno));
+        exit(-1);
+    }
 
     agent.broadcast_addr.sin_family = AF_INET;
     agent.broadcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-    agent.broadcast_addr.sin_port = htons (8508);
+    agent.broadcast_addr.sin_port = htons (MASTER_RXPORT);
 
-    sendto(agent.sock, rxbuf, 32, 0, (struct sockaddr *)&agent.broadcast_addr, sizeof(agent.broadcast_addr));
+    //sendto(agent.rxsock, rxbuf, 32, 0, (struct sockaddr *)&agent.broadcast_addr, sizeof(agent.broadcast_addr));
 
-#if 0
-    LOG_TRACE("agent.sock ready");
+    LOG_TRACE("agent.rxsock ready");
 
-    agent.sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if(agent.sock < -1)
+    agent.txsock = socket(AF_INET, SOCK_DGRAM, 0);
+    if(agent.txsock < -1)
     {
-        LOG_ERROR("failed to create agent.sock. %s", strerror(errno));
+        LOG_ERROR("failed to create agent.txsock. %s", strerror(errno));
         exit(-1);
     }
-#endif
     /* without this flag a socket cannot send broadcasting packet. */
-    i = setsockopt(agent.sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
+    i = setsockopt(agent.txsock, SOL_SOCKET, SO_BROADCAST, &enable, sizeof(enable));
     if (i < 0)
     {
         LOG_ERROR("SO_BROADCAST fail. %s", strerror(errno));
         exit(-1);
     }
 
+    struct sockaddr_in txaddr;
+    memset (&txaddr, 0, sizeof(txaddr));
+    txaddr.sin_family = AF_INET;
+    txaddr.sin_addr.s_addr = INADDR_ANY;
+    txaddr.sin_port = htons (AGENT_TXPORT);
 
-#if 0
-    i = connect(agent.sock, (struct sockaddr *) &txaddr, sizeof(txaddr));
+    i = bind(agent.txsock, (struct sockaddr *)&txaddr, sizeof(txaddr));
     if(i < -1)
     {
-        LOG_ERROR("failed to connect agent.sock. %s", strerror(errno));
+        LOG_ERROR("failed to bind agent.txsock. %s", strerror(errno));
+        exit(-1);
+    }
+
+#if 0
+    i = connect(agent.txsock, (struct sockaddr *) &txaddr, sizeof(txaddr));
+    if(i < -1)
+    {
+        LOG_ERROR("failed to connect agent.txsock. %s", strerror(errno));
         exit(-1);
     }
 #endif
 
-    LOG_TRACE("agent.sock ready");
+    LOG_TRACE("agent.txsock ready");
 
 
     /* broadcast heartbeat all the time. */
@@ -706,13 +726,13 @@ int main(int argc, char ** argv)
     while (1)
     {
         FD_ZERO(&rxfds);
-        FD_SET(agent.sock, &rxfds);
+        FD_SET(agent.rxsock, &rxfds);
 
         timeout.tv_sec = 60;
         timeout.tv_usec = 0;
 
         LOG_TRACE("waiting for data");
-        i = select(agent.sock + 1, &rxfds, NULL, NULL, &timeout);
+        i = select(agent.rxsock + 1, &rxfds, NULL, NULL, &timeout);
         if (i < 0)
         {
             if (EINTR == errno)
@@ -722,25 +742,95 @@ int main(int argc, char ** argv)
             exit(-1);
         }
 
-        if (FD_ISSET(agent.sock, &rxfds))
+        if (FD_ISSET(agent.rxsock, &rxfds))
         {
+            #if 0
             struct sockaddr_in src_addr;
             socklen_t addrlen;
-            i = recvfrom(agent.sock, rxbuf, sizeof(rxbuf), 0, (struct sockaddr *)&src_addr, &addrlen);
-            LOG_VERBOSE("got data from %s", inet_ntop(AF_INET, (struct sockaddr *)&src_addr.sin_addr, ipbuf, sizeof(ipbuf)));
+            i = recvfrom(agent.rxsock, rxbuf, sizeof(rxbuf), 0, (struct sockaddr *)&src_addr, &addrlen);
+            LOG_DEBUG("got data from %s", inet_ntop(AF_INET, (struct sockaddr *)&src_addr.sin_addr, ipbuf, sizeof(ipbuf)));
             hexdump("rxbuf", rxbuf, i);
-            if (i > CHUNK_SIZE)
+            #else
+            char cmbuf[0x100];
+            struct sockaddr_in src_addr, localaddr;
+            socklen_t src_addrlen;
+            char buffer[CHUNK_SIZE+1];
+            struct iovec iov[1];
+            iov[0].iov_base=buffer;
+            iov[0].iov_len=sizeof ( buffer );
+            struct msghdr mh =
             {
-                LOG_ERROR("got something wrong?");
-                continue;
-            }
+                .msg_name = &src_addr,
+                .msg_namelen = sizeof (src_addr),
+                .msg_control = cmbuf,
+                .msg_controllen = sizeof (cmbuf ),
+                .msg_iov=iov,                                                           
+                .msg_iovlen=1
+            };
+            struct cmsghdr *cmsg = NULL;
+            // if you want access to the data you need to init the msg_iovec fields
 
+
+            memset(&src_addr, 0, sizeof(struct sockaddr_in));
+
+            i = recvmsg(agent.rxsock, &mh, 0);
+
+            #endif
 
             if (i < 0)
             {
                 LOG_ERROR("select recv fail. %s", strerror(errno));
                 continue;
             }
+
+            if (i > CHUNK_SIZE)
+            {
+                LOG_ERROR("got something wrong? drop it.");
+                continue;
+            }
+
+            /* if not broadcast, acknowledge it. */
+            {
+                for ( // iterate through all the control headers
+                    cmsg = CMSG_FIRSTHDR(&mh);
+                    cmsg != NULL;
+                    cmsg = CMSG_NXTHDR(&mh, cmsg))
+                {
+                    // ignore the control headers that don't match what we want
+                    if (cmsg->cmsg_level != IPPROTO_IP ||
+                        cmsg->cmsg_type != IP_PKTINFO)
+                    {
+                        continue;
+                    }
+                    // struct in_pktinfo {
+                    //     unsigned int   ipi_ifindex;  /* Interface index */
+                    //     struct in_addr ipi_spec_dst;  Local address 
+                    //     struct in_addr ipi_addr;     /* Header Destination
+                    //                                     address */
+                    // };
+                    struct in_pktinfo *pi = (struct in_pktinfo *)CMSG_DATA(cmsg);
+
+                    char dst[100],ipi[100];//用来保存转化后的源IP地址，目标主机地址
+                    // pi->ipi_spec_dst 是UDP包中的路由目的IP地址（the destination in_addr）
+                    // pi->ipi_addr 是UDP包中的头标识目的地址（the receiving interface in_addr）
+                    if ((inet_ntop(AF_INET, &(pi->ipi_spec_dst), dst, sizeof(dst))) != NULL)
+                    {
+                        LOG_DEBUG ( "路由目的IP地址IP dst=%s",dst);
+                    }
+                    if ((inet_ntop(AF_INET, &(pi->ipi_addr), ipi, sizeof (ipi))) != NULL)
+                    {
+                        LOG_DEBUG ("头标识目的地址ipi_addr=%s",ipi);
+                    }
+                    if ((inet_ntop(AF_INET, &src_addr, ipi, sizeof (ipi))) != NULL)
+                    {
+                        LOG_DEBUG ("源地址=%s",ipi);
+                    }
+
+
+                }
+            }
+            send_ack(rxbuf, i, agent.rxsock, (struct sockaddr *)&src_addr, sizeof(struct sockaddr));
+
 
             /* save data into cache, in case there are more data comming. */
             cache_write(cache, rxbuf, i);
@@ -749,7 +839,7 @@ int main(int argc, char ** argv)
             /*
              * How do we know if a file has been fully sent?
              * A trick used here is to always send a chunk
-             * less than 512 as the last chunk.
+             * less than CHUNK_SIZE as the last chunk (could be 0).
              */
 
             if (i != CHUNK_SIZE) /* the last chunk! */
@@ -766,9 +856,6 @@ int main(int argc, char ** argv)
                     cache_clear(cache);
                     continue;
                 }
-
-                /* acknowledge it first */
-                send_ack(data, len, agent.sock, (struct sockaddr *)&src_addr, addrlen);
 
                 cache_clear(cache);
             }
