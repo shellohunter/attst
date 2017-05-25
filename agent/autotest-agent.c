@@ -25,72 +25,9 @@
 #include <linux/if.h>
 
 #include "cache.h"
-
-#define OK (0)
-#define NG (-1)
-#define AG (1)
-
-
-#define MAX(a,b) (a)>(b)?(a):(b)
-#define MIN(a,b) (a)>(b)?(b):(a)
-/* UDP supports various datagram length, but for better compatibility, we
- * always send data in 512 bytes chunks.
- */
-#define CHUNK_SIZE (500)
-#define MASTER_TXPORT (65071)
-#define MASTER_RXPORT (65072)
-#define AGENT_TXPORT (65171)
-#define AGENT_RXPORT (65172)
-
-/* log level */
-enum
-{
-    LOG_LVL_NONE = 0,
-    LOG_LVL_FATAL,
-    LOG_LVL_ASSERT,
-    LOG_LVL_ERROR,
-    LOG_LVL_WARNING,
-    LOG_LVL_DEBUG,
-    LOG_LVL_TRACE,
-    LOG_LVL_API,
-    LOG_LVL_VERBOSE,
-    LOG_LVL_ALL = 99,
-};
-
-#define LOG_TRACE(...) \
-    if (__loglvl__ >= LOG_LVL_TRACE) do { \
-        fprintf(stderr, "<trace> "); \
-        fprintf(stderr, __VA_ARGS__); \
-        fprintf(stderr, ". L%d, %s\n", __LINE__, __FUNCTION__); \
-    } while(0)
-
-#define LOG_DEBUG(...) \
-    if (__loglvl__ >= LOG_LVL_DEBUG) do { \
-        fprintf(stderr, "<dbg> "); \
-        fprintf(stderr, __VA_ARGS__); \
-        fprintf(stderr, ". L%d, %s\n", __LINE__, __FUNCTION__); \
-    } while(0)
-
-#define LOG_ERROR(...) \
-    if (__loglvl__ >= LOG_LVL_ERROR) do { \
-        fprintf(stderr, "<error> "); \
-        fprintf(stderr, __VA_ARGS__); \
-        fprintf(stderr, ". L%d, %s\n", __LINE__, __FUNCTION__); \
-    } while(0)
-
-#define LOG_VERBOSE(...) \
-    if (__loglvl__ >= LOG_LVL_VERBOSE) do { \
-        fprintf(stderr, __VA_ARGS__); \
-    } while(0)
-
-#define ASSERT(cond) \
-    if (__loglvl__ > LOG_LVL_ASSERT) do { \
-        if(!(cond)) \
-        { \
-            fprintf(stderr,"<assert> [%s] FAIL, %s L%d\n", #cond, __FUNCTION__, __LINE__); \
-            exit(-1); \
-        } \
-    } while(0)
+#include "common.h"
+#include "usock.h"
+#include "log.h"
 
 
 
@@ -107,11 +44,11 @@ enum
 typedef struct
 {
     int state;
-#if 1
+#if 0
     int rxsock;
     int txsock;
 #else
-    int sock;
+    usock * sock;
 #endif
     int ip;
     int master;
@@ -128,7 +65,6 @@ typedef struct __CGI__
 } CGI;
 
 
-int    __loglvl__ = 0;
 int    __daemon__ = 0;
 char * __agent_ip__ = NULL;
 char * __master_ip__ = NULL;
@@ -137,48 +73,6 @@ char * _cgi_root_ = ".";  // lua scripts path
 pthread_mutex_t _cgi_mutex_ = PTHREAD_MUTEX_INITIALIZER;
 
 
-
-void hexdump(char * txt, char * buf, size_t len)
-{
-    int i, c;
-    char * base = buf;
-
-    LOG_VERBOSE("=============>> %s, len %zu.\n", txt?txt:"", len);
-    while ((int)len > 0)
-    {
-        LOG_VERBOSE("%08x: ", (int)(buf - base));
-        for (i = 0;  i < 16;  i++)
-        {
-            if (i < len)
-            {
-                LOG_VERBOSE("%02X ", buf[i] & 0xFF);
-            }
-            else
-            {
-                LOG_VERBOSE("   ");
-            }
-            if (i == 7) LOG_VERBOSE(" ");
-        }
-        LOG_VERBOSE(" |");
-        for (i = 0;  i < 16;  i++)
-        {
-            if (i < (int)len)
-            {
-                c = buf[i] & 0xFF;
-                if ((c < 0x20) || (c >= 0x7F)) c = '.';
-            }
-            else
-            {
-                c = ' ';
-            }
-            LOG_VERBOSE("%c", c);
-        }
-        LOG_VERBOSE("|\n");
-        len -= 16;
-        buf += 16;
-    }
-    LOG_VERBOSE("=============<<\n");
-}
 
 
 CGI * __cgi__ = NULL;
@@ -642,6 +536,7 @@ int main(int argc, char ** argv)
         agent.masteraddr.sin_port = htons (8508);
     }
 
+    #if 0
     agent.rxsock = socket(AF_INET, SOCK_DGRAM, 0);
     if(agent.rxsock < -1)
     {
@@ -714,7 +609,11 @@ int main(int argc, char ** argv)
 #endif
 
     LOG_TRACE("agent.txsock ready");
+    #else
 
+    agent.sock = usock_open();
+
+    #endif
 
     /* broadcast heartbeat all the time. */
     if (pthread_create(&tid, NULL, hi, (void*)&agent))
@@ -722,7 +621,7 @@ int main(int argc, char ** argv)
         LOG_DEBUG("pthread create error %s.", strerror(errno));
     }
 
-    char ipbuf[1024];
+    //char ipbuf[1024];
     while (1)
     {
         FD_ZERO(&rxfds);
@@ -752,8 +651,8 @@ int main(int argc, char ** argv)
             hexdump("rxbuf", rxbuf, i);
             #else
             char cmbuf[0x100];
-            struct sockaddr_in src_addr, localaddr;
-            socklen_t src_addrlen;
+            struct sockaddr_in src_addr; //, localaddr;
+            //socklen_t src_addrlen;
             char buffer[CHUNK_SIZE+1];
             struct iovec iov[1];
             iov[0].iov_base=buffer;
