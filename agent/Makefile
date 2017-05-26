@@ -1,6 +1,6 @@
 CFLAGS += -Wall -Werror -g
 
-exe := autotest-agent.exe
+exe := agent.exe
 exeobjs := agent.o cache.o usock.o log.o common.o
 
 all: $(exe)

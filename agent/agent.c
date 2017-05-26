@@ -180,30 +180,6 @@ __error:
 }
 
 
-int send_chunk(int sock, char * data, int len, int flag, struct sockaddr * addr, socklen_t addrlen)
-{
-    int i = 0;
-    int n = len;
-    int m;
-
-    do
-    {
-        m = MIN(n, CHUNK_SIZE);
-        i = sendto(sock, data, m, flag, addr, addrlen);
-        if(i != m)
-        {
-            LOG_ERROR("%s, retry it.", strerror(errno));
-            continue;
-        }
-
-        n -= i;
-    }
-    while(n > 0);
-
-    ASSERT(n == 0);
-    return len - n;
-}
-
 /* An test agent will broadcast its identification periodically.
  */
 void * hi(void * pvdata)
