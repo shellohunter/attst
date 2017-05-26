@@ -24,18 +24,19 @@
 #define AGENT_RXPORT (65172)
 
 
-typedef struct 
+typedef struct
 {
-	int rxsock;
-	int txsock;
-	struct sockaddr_in broadcast_addr;
+    int rxsock;
+    int txsock;
+    struct sockaddr_in broadcast_addr;
 } usock;
 
 
 usock * usock_open();
-int usock_send(usock * sock, const void *buf, size_t len, int flags,
-				const struct sockaddr *dest_addr, socklen_t addrlen);
-int usock_recv(usock * sock, void *buf, size_t len, int flags);
+int usock_send(usock * sock, const char *buf, size_t len, int flags,
+               const struct sockaddr *dest_addr, socklen_t addrlen);
+int usock_broadcast(usock * sock, const char *buf, size_t len, int flags);
+int usock_recv(usock * sock, char *buf, size_t len, int flags);
 int usock_close(usock * sock);
 
 #endif /* __USOCK_H__ */

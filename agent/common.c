@@ -5,12 +5,13 @@
 #include "log.h"
 #include "common.h"
 
-void hexdump(char * txt, char * buf, size_t len)
+void hexdump(char * txt, void * vbuf, size_t len)
 {
     int i, c;
+    char * buf = vbuf;
     char * base = buf;
 
-    LOG_VERBOSE("=============>> %s, len %zu.\n", txt?txt:"", len);
+    LOG_VERBOSE("======= hexdump =======>> %s, len %zu.\n", txt?txt:"", len);
     while ((int)len > 0)
     {
         LOG_VERBOSE("%08x: ", (int)(buf - base));
@@ -44,5 +45,5 @@ void hexdump(char * txt, char * buf, size_t len)
         len -= 16;
         buf += 16;
     }
-    LOG_VERBOSE("=============<<\n");
+    LOG_VERBOSE("======= hexdump =======<<\n");
 }

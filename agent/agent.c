@@ -48,7 +48,6 @@ typedef struct
     int ip;
     int master;
     struct sockaddr_in masteraddr;
-    struct sockaddr_in broadcast_addr;
 } Agent;
 
 
@@ -166,7 +165,6 @@ int run_lua(char * luafile, handle cache, char * data, int len)
         const char * rsp_buf = NULL;
         size_t rsp_len = 0;
         rsp_buf = lua_tolstring(L, -1, &rsp_len);
-        hexdump("cgi return", (char *)rsp_buf, rsp_len);
         if (cache != NULL_HANDLE)
             cache_write(cache, rsp_buf, rsp_len);
     }
@@ -240,7 +238,7 @@ void * hi(void * pvdata)
         LOG_DEBUG("hi \"%d\"", counter++);
 
         i = usock_send(agent->sock, data, len, 0,
-                       (struct sockaddr *)&agent->broadcast_addr, sizeof(agent->broadcast_addr));
+                       (struct sockaddr *)&agent->sock->broadcast_addr, sizeof(agent->sock->broadcast_addr));
         cache_clear(cache);
         if(i != len)
         {
@@ -503,6 +501,7 @@ int main(int argc, char ** argv)
     if (pthread_create(&tid, NULL, hi, (void*)&agent))
     {
         LOG_DEBUG("pthread create error %s.", strerror(errno));
+        exit(NG);
     }
 
     //char ipbuf[1024];
@@ -533,8 +532,7 @@ int main(int argc, char ** argv)
         {
             char * data;
             int len = cache_getdata(cache, &data);
-            hexdump("cache", data, len);
-
+            hexdump("take data out of cache", data, len);
 
             /* check if it is a valid message */
             i = handle_message(&agent, data, len);

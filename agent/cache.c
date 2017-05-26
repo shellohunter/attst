@@ -138,7 +138,7 @@ void cache_dump(handle hd)
     ASSERT(c);
 
     fprintf(stderr, "<%s> cache=%p, buf=%p, buflen=%d, datalen=%d.\n",
-                __FUNCTION__, c, c->buf, c->buflen, c->datalen);
+            __FUNCTION__, c, c->buf, c->buflen, c->datalen);
     dumphex("cache data:", c->buf, (c->datalen+0xF)&(~0xF));
 }
 

@@ -63,9 +63,9 @@ class USock():
 		"""
 		self.__expect_ack = chksum
 		while True:
-			print("expecting ack ", str(chksum), str(addr))
+			print("expecting ack ", chksum, "from", addr)
 			self.txsock.settimeout(3)
-			data, addr = self.txsock.recvfrom(self.CHUNK_SIZE)
+			data, sender = self.txsock.recvfrom(self.CHUNK_SIZE)
 			self.txsock.settimeout(None)
 			if data == chksum:
 				print("got ack!", data)

@@ -536,7 +536,7 @@ int main(int argc, char ** argv)
         agent.masteraddr.sin_port = htons (8508);
     }
 
-    #if 0
+#if 0
     agent.rxsock = socket(AF_INET, SOCK_DGRAM, 0);
     if(agent.rxsock < -1)
     {
@@ -609,11 +609,11 @@ int main(int argc, char ** argv)
 #endif
 
     LOG_TRACE("agent.txsock ready");
-    #else
+#else
 
     agent.sock = usock_open();
 
-    #endif
+#endif
 
     /* broadcast heartbeat all the time. */
     if (pthread_create(&tid, NULL, hi, (void*)&agent))
@@ -643,13 +643,13 @@ int main(int argc, char ** argv)
 
         if (FD_ISSET(agent.rxsock, &rxfds))
         {
-            #if 0
+#if 0
             struct sockaddr_in src_addr;
             socklen_t addrlen;
             i = recvfrom(agent.rxsock, rxbuf, sizeof(rxbuf), 0, (struct sockaddr *)&src_addr, &addrlen);
             LOG_DEBUG("got data from %s", inet_ntop(AF_INET, (struct sockaddr *)&src_addr.sin_addr, ipbuf, sizeof(ipbuf)));
             hexdump("rxbuf", rxbuf, i);
-            #else
+#else
             char cmbuf[0x100];
             struct sockaddr_in src_addr; //, localaddr;
             //socklen_t src_addrlen;
@@ -663,7 +663,7 @@ int main(int argc, char ** argv)
                 .msg_namelen = sizeof (src_addr),
                 .msg_control = cmbuf,
                 .msg_controllen = sizeof (cmbuf ),
-                .msg_iov=iov,                                                           
+                .msg_iov=iov,
                 .msg_iovlen=1
             };
             struct cmsghdr *cmsg = NULL;
@@ -674,7 +674,7 @@ int main(int argc, char ** argv)
 
             i = recvmsg(agent.rxsock, &mh, 0);
 
-            #endif
+#endif
 
             if (i < 0)
             {
@@ -703,7 +703,7 @@ int main(int argc, char ** argv)
                     }
                     // struct in_pktinfo {
                     //     unsigned int   ipi_ifindex;  /* Interface index */
-                    //     struct in_addr ipi_spec_dst;  Local address 
+                    //     struct in_addr ipi_spec_dst;  Local address
                     //     struct in_addr ipi_addr;     /* Header Destination
                     //                                     address */
                     // };
