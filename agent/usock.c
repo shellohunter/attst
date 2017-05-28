@@ -266,10 +266,7 @@ int usock_recv(usock * sock, char * buf, size_t len, int flags)
         }
 #if 1
         cmbuf[i]=0;
-        LOG_VERBOSE("Receive: %d Bytes。\tThe Message Is:%s\n", i, buf);
-
-
-        hexdump("recvmsg got", buf, i);
+        hexdump("recvmsg got data", buf, i);
 
         // interate the msg
         struct cmsghdr *cmsg ;

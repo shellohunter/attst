@@ -11,13 +11,13 @@ class USock():
 	TXPORT , send data, receive ack
 	RXPORT , receive data, reply ack
 	"""
+	HEAD_SIZE = 12
+	CHUNK_SIZE = 500
+	MASTER_TXPORT = 65071
+	MASTER_RXPORT = 65072
+	AGENT_TXPORT = 65171
+	AGENT_RXPORT = 65172
 	def __init__(self):
-		self.HEAD_SIZE = 12
-		self.CHUNK_SIZE = 500
-		self.MASTER_TXPORT = 65071
-		self.MASTER_RXPORT = 65072
-		self.AGENT_TXPORT = 65171
-		self.AGENT_RXPORT = 65172
 		self.rxseq = 0
 		self.txseq = 0
 		self.txsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
