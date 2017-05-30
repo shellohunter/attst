@@ -61,7 +61,7 @@ class Master(object):
 			# we review test agents every 30s to check if they are still alive.
 			print("I'm the master, now review all my %d agents!"%(len(self.agents)))
 			for agent in self.agents:
-				if not self.detect(agent):
+				if not self.ping(agent):
 					if agent.noreply < agent.lost:
 						print("agent {0} not responding! retry {1}".format(str(agent), agent.noreply))
 						agent.noreply = agent.noreply + 1
@@ -79,7 +79,7 @@ class Master(object):
 			msg = {
 				"id":1,
 				"from":"master",
-				"to":"all",
+				"to": str(agent.addr),
 				"type":"ping",
 			}
 
@@ -129,7 +129,7 @@ class Master(object):
 						master.sock.sendto(dict2json(himsg), (addr[0], USock.AGENT_RXPORT))
 
 						# add new agent
-						newagent = Agent()
+						newagent = Agent(addr)
 						print(newagent)
 						print("we got an new agent {0}".format(str(newagent)))
 						master.agents.append(newagent)
@@ -199,8 +199,9 @@ class PowerManager():
 
 class Agent():
 	"""docstring for Agent"""
-	def __init__(self):
+	def __init__(self, addr):
 		try:
+			self.addr = addr
 			self.pwm = PowerManager()
 			self.logger = Logger("/dev/ttyS1")
 			self.name = ""

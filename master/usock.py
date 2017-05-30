@@ -22,8 +22,10 @@ class USock():
 		self.txseq = 0
 		self.txsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		self.txsock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+		self.txsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self.txsock.bind(("", self.MASTER_TXPORT))
 		self.rxsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		self.rxsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self.rxsock.bind(("", self.MASTER_RXPORT))
 		self.__expect_ack = None
 
