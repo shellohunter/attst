@@ -11,23 +11,20 @@ import sched
 from base64 import b64encode, b64decode
 import hashlib
 import traceback
+import subprocess
+import threading
+import urllib.request
 
 
 from usock import USock
 from testcase import TestCase
 
 
-__id__ = 0
 
-def id():
-	global __id__
-	__id__ = __id__ + 1
-	return __id__
-
-def pack(msg):
+def dict2json(msg):
 	return json.dumps(msg).encode("utf8")
 
-def unpack(jsonbytes):
+def json2dict(jsonbytes):
 	try:
 		return json.loads(jsonbytes.decode("utf8"))
 	except Exception as e:
@@ -35,61 +32,133 @@ def unpack(jsonbytes):
 		raise e
 
 
-import subprocess
-import threading
+class Master(object):
+	"""test master!"""
+	def __init__(self, arg = None):
+		super(Master, self).__init__()
+		self.arg = arg
+		self.agents = []
+		self.sock = USock()
+		self.msg_thread = threading.Thread(target=self.rx_thread, args=[self], name="rx_thread")
 
+	def run(self):
+		self.msg_thread.start()
 
-def dummy():
-	while True:
-		print("Hi I'm a dummy thread! My name is "+threading.current_thread().name)
-		time.sleep(10)
+		# ping all partners, we will handle the responses in msg_thread
+		msg = {
+			"id":1,
+			"from":"master",
+			"to":"all",
+			"type":"ping",
+		}
+		print("ping all partners!")
+		self.sock.broadcast(dict2json(msg))
 
-
-def check_firmware():
-	firmware = {
-		"chip" : "mt7621",
-		"url" : "http://172.26.66.95/autobuild/openwrt-build-sanity-2017-05-15-01-00-01/openwrt-build-sanity-7621-7615d/openwrt-build-sanity-7621-7615d-31cfb80c-2017-05-15-01-00-02.bin",
-	}
-	return firmware
-
-
-def pwm_thread():
-	# TODO
-	return dummy()
-
-def log_thread():
-	# TODO
-	# scan COM{n}
-	# capture log for each COM, select/poll?
-	try:
-		ser = serial.Serial('/dev/ttyS0', 57600, timeout=60)
-		print(ser.name)
-		print(ser)
+		# looping until the end of the world
 		while True:
+			time.sleep(10)
+
+			# we review test agents every 30s to check if they are still alive.
+			print("I'm the master, now review all my %d agents!"%(len(self.agents)))
+			for agent in self.agents:
+				if not self.ping(agent):
+					if agent.noreply < agent.lost:
+						print("agent {0} not responding! retry {1}".format(str(agent), agent.noreply))
+						agent.noreply = agent.noreply + 1
+					else:
+						print("we lost agent {0}!".format(str(agent)))
+						self.agents.remove(agent)
+				else:
+					print("agent {0} goes well.".format(str(agent)))
+
+	def ping(self, agent = None):
+		targets = [agent] if agent else self.agents
+		for target in targets:
+			msg = {
+				"id":1,
+				"from":"master",
+				"to": str(agent.addr),
+				"type":"ping",
+			}
+
+			if self.sock.sendto(dict2json(msg), (target.addr[0], USock.AGENT_RXPORT)):
+				return True
+			else:
+				return False
+
+	@staticmethod
+	def job_thread(master):
+		while True:
+			print("msg thread!")
+			sleep(10)
+
+
+
+	@staticmethod
+	def rx_thread(master):
+		while True:
+			print("msg thread!")
 			try:
-				print("<"+time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))+"> ", end="")
-				print(ser.readline().decode("utf8"), end="")
-				#time.sleep(1)
-			except serial.SerialException:
-				print('SerialException!')
-				ser.close()
-				#time.sleep(1)
-	except Exception as e:
-		print("warning! unable to capture log from /dev/ttyS0!")
-		# raise e
-	finally:
-		pass
+				msg, addr = master.sock.recv()
+				print("received %s from %s"%(str(msg), str(addr)))
+
+				jmsg = json2dict(msg)
+				if jmsg["type"] == "pong":
+					if jmsg["from"] == "agent":
+						himsg = {
+							"id":1,
+							"from":"master",
+							"to": str(addr),
+							"type":"hi",
+						}
+						master.sock.sendto(dict2json(himsg), addr)
+				elif jmsg["type"] == "hi":
+					if jmsg["from"] != "agent":
+						continue
+					if True: #jmsg[""]:
+						himsg = {
+							"id":1,
+							"from":"master",
+							"to": str(addr),
+							"type":"hi",
+						}
+						print("got hi msg from agent %s@%s "%(jmsg["data"]["id"], addr))
+						print("say hi to agent ", addr[0], USock.AGENT_RXPORT)
+						master.sock.sendto(dict2json(himsg), (addr[0], USock.AGENT_RXPORT))
+
+
+						for agent in master.agents:
+							if agent.id == jmsg["data"]["id"]:
+								# already have it
+								print("a known agent "+jmsg["data"]["id"])
+								break
+						else:
+							# add new agent
+							newagent = Agent(addr)
+							newagent.id = jmsg["data"]["id"]
+							print(newagent)
+							print("we got an new agent {0}".format(str(newagent)))
+							master.agents.append(newagent)
+
+				# message handler
+			except Exception as e:
+				print(e)
+				raise e
+			finally:
+				pass
 
 
 class Logger():
 	def __init__(self, dev, bitrate=57600, timeout=60, logpath="."):
-		self.dev = dev
-		self.bitrate = bitrate
-		self.timeout = timeout
-		self.logpath = logpath
-		self.thread = threading.Thread(target=log_thread, args=[], name="log")
-		self.fd = None
-
+		try:
+			self.dev = dev
+			self.bitrate = bitrate
+			self.timeout = timeout
+			self.logpath = logpath
+			self.thread = None #threading.Thread(target=log_thread, args=[], name="log")
+			self.fd = None
+		except Exception as e:
+			print("Failed to create Logger", e)
 
 	def start_capture(self, mark="<"*32):
 		self.fd = serial.Serial('COM4', 57600, 60)
@@ -99,200 +168,74 @@ class Logger():
 		pass
 
 
-"""
-class TestCase():
-	def __init__(self):
-		pass
+class PowerManager():
+	"""This class manipulate power-management"""
+	def __init__(self, baseurl = "http://10.10.100.254"):
+		try:
+			self.baseurl = baseurl
+		except Exception as e:
+			print("Failed to create PowerManager", e)
 
-	def load_script():
-		ss = os.listdir(".")
-		scripts = []
-		for s in ss:
-			if s.match(r"\d{3}"):
-				scripts.append(s)
+	def __request(self, url):
+		username = "admin"
+		password = "admin"
 
-		for i,s in enumerate(ss.sort()):
-			print(i, s)
-
-
-class TestInstance():
-	def __init__(self, swinfo):
-		self.script_path = "."
-		# register pwm
-		self.pwm = PowerManager(poweron, poweroff)
-
-		# register log
-		self.log = Logger(dev="COM1", logpath=".")
-
-	def sanity_check(self):
-		# check if target device is online
-		for each in test_sets:
-			if each["hw"] == firmware["hw"]:
-				return True
+		if url.startswith("/"):
+			full_url = self.baseurl + url
+		elif url.startswith("http"):
+			full_url = url
 		else:
-			print("the requested hw does not exist!"+firmware["hw"])
-			return False
+			print("invalid url %s"%(url))
+			return
 
-	def run(self, testcase):
-		pass
-"""
+		auth_handler = urllib.request.HTTPBasicAuthHandler()
+		auth_handler.add_password(realm="USR-IO88", uri=full_url, user=username, passwd=password)
+		opener = urllib.request.build_opener(auth_handler)
+		urllib.request.install_opener(opener)
+		f = urllib.request.urlopen(full_url)
+		print(f.read(100).decode('utf-8'))
 
-def run_test(testcase):
+	def power_down(self):
+		self.__request("/httpapi.json?&CMD=UART_WRITE&UWHEXVAL=0")
 
-	pass
-	return 
+	def power_on(self):
+		self.__request("/httpapi.json?&CMD=UART_WRITE&UWHEXVAL=1")
 
-def post_report(testcase, result):
-	pass
 
-def test_thread(test):
-	testcases = load_test_case(test.script_path)
-	for testcase in testcases:
+
+class Agent():
+	"""docstring for Agent"""
+	def __init__(self, addr):
 		try:
-			report = run_test_case(testcase)
-			if not report or not report.get("result"):
-				print("testcase failed!")
-			else:
-				print("testcase pass!")
-			post_report()
+			self.addr = addr
+			self.pwm = PowerManager()
+			self.logger = Logger("/dev/ttyS1")
+			self.name = ""
+			self.noreply = 0 # if agent no responding, retry++.
+			self.lost = 5 # if retry > lost, we lost the agent. remove it.
+			self.id = str(addr) # every agent has an unique id.
 		except Exception as e:
-			print(e)
-			raise e
-		finally:
-			pass
+			print("Failed to create Agent.", e)
 
+	def execute(self, cmd):
+		"""send cmd to agent, the agent will execute it and return result"""
+		status = True,
+		result = "Mission completed."
+		return status, result
 
-class TestCase_Upgrade(TestCase):
-	def prepare(self):
-		print("TestCase_Upgrade.prepare")
-	def run(self):
-		print("TestCase_Upgrade.run")
-	def complete(self):
-		print("TestCase_Upgrade.complete")
+	def reboot(self):
+		ret, str = self.execute("reboot")
+		print(ret, str)
 
+	def power_down(self):
+			self.pwm.power_down()
 
-def msg_thread(sock):
-	while True:
-		print("msg thread!")
-		try:
-			msg, addr =sock.recv()
-			print("received %s from %s"%(str(msg), str(addr)))
-
-			jmsg = unpack(msg)
-			if jmsg["type"] == "pong":
-				if jmsg["from"] == "agent":
-					himsg = {
-						"id":1,
-						"from":"master",
-						"to": str(addr),
-						"type":"hi",
-					}
-					sock.sendto(pack(himsg), addr)
-			elif jmsg["type"] == "hi":
-				if jmsg["from"] != "agent":
-					continue
-				if True: #jmsg[""]:
-					himsg = {
-						"id":1,
-						"from":"master",
-						"to": str(addr),
-						"type":"hi",
-					}
-					print("got hi msg from agent ",addr)
-					print("say hi to agent ", addr[0], sock.AGENT_RXPORT)
-					sock.sendto(pack(himsg), (addr[0], sock.AGENT_RXPORT))
-			# message handler
-		except Exception as e:
-			print(e)
-			raise e
-		finally:
-			pass
-
-
-#rxsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-#txsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-mainsock = USock()
-
-pwm_thread = threading.Thread(target=pwm_thread, args=[], name="pwm")
-log_thread = threading.Thread(target=log_thread, args=[], name="log")
-msg_thread = threading.Thread(target=msg_thread, args=[mainsock], name="msg")
-
-print("msg_thread.start()!")
-msg_thread.start()
-print("pwm_thread.start()!")
-pwm_thread.start()
-print("log_thread.start()!")
-log_thread.start()
-
-# scan test sets
-# this is useful when master get restarted.
-test_sets = []
-
-
-# ping all partners, we will handle the responses in msg_thread
-msg = {
-	"id":1,
-	"from":"master",
-	"to":"all",
-	"type":"ping",
-}
-print("ping all partners!")
-mainsock.broadcast(pack(msg))
-
-schedtask = sched.scheduler(time.time, time.sleep)
-def print_time(a='default'):
-    print("From print_time", time.time(), a)
-
-def print_some_times():
-    print(time.time())
-    schedtask.enter(10, 1, print_time)
-    schedtask.enter(5, 2, print_time, argument=('positional',))
-    schedtask.enter(5, 1, print_time, kwargs={'a': 'keyword'})
-    schedtask.run()
-    print(time.time())
-
-print_some_times()
-
-
-while True:
-	time.sleep(1)
-
-	# check if a new firmware is available
-	firmware = check_firmware()
-	if not firmware:
-		time.sleep()
-		continue
-	print("firmware update available")
-	print(firmware.get("chip"), firmware.get("url"))
-
-	# check if corresponding target device is available
-
-	for target in test_sets:
-		if target.get("cpu") != firmware.get("cpu"):
-			continue
-		if target.busy():
-			print("target busy, postpone it.")
-			break
-	else:
-		print("target not available.")
-
-	print("start to test target "+str(target))
-
-	test = []
-	new_test = threading.Thread(target=test_thread, args=[firmware], name="test-mt7620")
-	test.append(new_test)
-	new_test.start()
-
-
-
-#threading.Thread(target=dummy, args=[], name="test-mt7621")
-#threading.Thread(target=dummy, args=[], name="test-mt7628")
-#threading.Thread(target=dummy, args=[], name="test-mt7622")
-#threading.Thread(target=dummy, args=[], name="test-mt7623")
+	def power_on(self):
+			self.pwm.power_on()
 
 
 
 
-
-
+if __name__ == '__main__':
+	master = Master()
+	master.run()

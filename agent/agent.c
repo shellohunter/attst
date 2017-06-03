@@ -30,6 +30,7 @@
 #include "log.h"
 
 
+#define MSG_HEAD_LEN (12)
 
 /* agent state */
 enum
@@ -511,7 +512,9 @@ int main(int argc, char ** argv)
             hexdump("take data out of cache", data, len);
 
             /* check if it is a valid message */
-            i = handle_message(&agent, data, len);
+            char head[MSG_HEAD_LEN] = {0};
+            memcpy(head, data, MSG_HEAD_LEN);
+            i = handle_message(&agent, data+MSG_HEAD_LEN, len);
             if (i != OK)
             {
                 cache_clear(cache);

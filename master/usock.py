@@ -1,6 +1,7 @@
 import socket
 import hashlib
 import struct
+import threading
 
 class USock():
 	"""
@@ -28,6 +29,7 @@ class USock():
 		self.rxsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self.rxsock.bind(("", self.MASTER_RXPORT))
 		self.__expect_ack = None
+		self.lock = threading.Lock()
 
 	def __ack(self, data, addr):
 		"""
@@ -41,23 +43,6 @@ class USock():
 		else:
 			self.rxsock.sendto(m.digest(), addr)
 
-
-	def broadcast(self, data):
-		"""
-		Broadcast data in CHUNK_SIZE. No ACK required.
-		"""
-		tmpdata = data
-		addr = ("<broadcast>", self.AGENT_RXPORT)
-		print("broadcast data to ", addr)
-		while len(tmpdata) > 0:
-			i = min(len(tmpdata), self.CHUNK_SIZE - self.HEAD_SIZE)
-			if self.txsock.sendto(tmpdata[0:i], addr):
-				tmpdata = data[i:]
-			else:
-				print("broadcast error "+str(addr))
-				return False
-		print("broadcast done "+str(addr))
-		return True
 
 	def __wait_ack(self, chksum, addr):
 		"""
@@ -82,7 +67,6 @@ class USock():
 		retry = 0
 		txsock = self.txsock if not txsock else txsock
 		while retry < maxretry:
-			print(bytes(retry))
 			head = struct.pack("Icccccccc", self.txseq, bytes(str(retry).encode("utf-8")),
 				b"0",b"0",b"0",b"0",b"0",b"0",b"0")
 			txsock.sendto(head+data, addr)
@@ -100,9 +84,34 @@ class USock():
 			self.__expect_ack = None
 			return False
 
+	def broadcast(self, data):
+		"""
+		Broadcast data in CHUNK_SIZE. No ACK required.
+		"""
+		tmpdata = data
+		addr = ("<broadcast>", self.AGENT_RXPORT)
+		if not self.lock.acquire(True, 10):
+			print("failed to acquire sock lock!")
+			return False
+		print("broadcast data to ", addr)
+		while len(tmpdata) > 0:
+			i = min(len(tmpdata), self.CHUNK_SIZE - self.HEAD_SIZE)
+			if self.txsock.sendto(tmpdata[0:i], addr):
+				tmpdata = data[i:]
+			else:
+				print("broadcast error "+str(addr))
+				self.lock.release()
+				return False
+		print("broadcast done "+str(addr))
+		self.lock.release()
+		return True
+
 	def sendto(self, data, addr, sock=None):
 		""" send data in CHUNK_SIZE and wait for ack if it is a unicast"""
 		print("send data to "+str(addr))
+		if not self.lock.acquire(True, 10):
+			print("failed to acquire sock lock!")
+			return False
 		tmpdata = data
 		assert addr
 
@@ -112,8 +121,10 @@ class USock():
 				tmpdata = data[i:]
 			else:
 				print("sendto error "+str(addr))
+				self.lock.release()
 				return False
 		print("send done "+str(addr))
+		self.lock.release()
 		return True
 
 	def recv(self):
