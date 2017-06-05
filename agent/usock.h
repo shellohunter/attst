@@ -18,6 +18,7 @@
  * always send data in 512 bytes chunks.
  */
 #define CHUNK_SIZE (500)
+#define MSG_HEAD_LEN (12)
 #define MASTER_TXPORT (65071)
 #define MASTER_RXPORT (65072)
 #define AGENT_TXPORT (65171)
@@ -30,6 +31,12 @@ typedef struct
     int txsock;
     struct sockaddr_in broadcast_addr;
 } usock;
+
+typedef struct 
+{
+	int seq;
+	char other[8];
+}header;
 
 
 usock * usock_open();

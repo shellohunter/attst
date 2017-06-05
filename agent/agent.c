@@ -30,7 +30,6 @@
 #include "log.h"
 
 
-#define MSG_HEAD_LEN (12)
 
 /* agent state */
 enum
@@ -409,7 +408,7 @@ int main(int argc, char ** argv)
 {
     int i = 0;
     char rxbuf[2048];
-    pthread_t tid;
+   // pthread_t tid;
     Agent agent;
     handle cache;
 
@@ -466,7 +465,7 @@ int main(int argc, char ** argv)
 
     if (__master_ip__)
     {
-        memset (&agent.masteraddr, 0, sizeof(agent.masteraddr));
+        memset (&agent.masteraddr, 0, sizeof(agent.masteraddr));//???
         agent.masteraddr.sin_family = AF_INET;
         agent.masteraddr.sin_addr.s_addr = htonl(agent.master);
         agent.masteraddr.sin_port = htons (8508);
@@ -475,11 +474,11 @@ int main(int argc, char ** argv)
     agent.sock = usock_open();
 
     /* broadcast heartbeat all the time. */
-    if (pthread_create(&tid, NULL, hi, (void*)&agent))
-    {
-        LOG_DEBUG("pthread create error %s.", strerror(errno));
-        exit(NG);
-    }
+    // if (pthread_create(&tid, NULL, hi, (void*)&agent))
+    // {
+    //     LOG_DEBUG("pthread create error %s.", strerror(errno));
+    //     exit(NG);
+    // }
 
     //char ipbuf[1024];
     while (1)
@@ -511,10 +510,12 @@ int main(int argc, char ** argv)
             int len = cache_getdata(cache, &data);
             hexdump("take data out of cache", data, len);
 
+            i = handle_message(&agent, data, len);
+
             /* check if it is a valid message */
-            char head[MSG_HEAD_LEN] = {0};
-            memcpy(head, data, MSG_HEAD_LEN);
-            i = handle_message(&agent, data+MSG_HEAD_LEN, len);
+            //char head[MSG_HEAD_LEN] = {0};
+            //memcpy(head, data, MSG_HEAD_LEN);
+            //i = handle_message(&agent, data+MSG_HEAD_LEN, len);
             if (i != OK)
             {
                 cache_clear(cache);

@@ -9,11 +9,12 @@
 #include "usock.h"
 
 
-/* ack = {}
- *
- */
-static int __send_ack(usock * sock, char * buf, int len, struct sockaddr * addr, socklen_t addrlen)
+
+static int nextseq=0;
+
+static int __send_ack(usock * sock, header * head,char * buf, int len, struct sockaddr * addr, socklen_t addrlen)
 {
+    LOG_TRACE("__send_ack");
     int i = 0;
     MD5_CTX ctx;
     unsigned char md[MD5_DIGEST_LENGTH];
@@ -21,13 +22,16 @@ static int __send_ack(usock * sock, char * buf, int len, struct sockaddr * addr,
     char ip[128];
 
     MD5_Init(&ctx);
+
+    MD5_Update(&ctx, (void *)head, MSG_HEAD_LEN);
     MD5_Update(&ctx, (void *)buf, len);
+    
     MD5_Final(md, &ctx);
 
     i = sendto(sock->rxsock, md, sizeof(md), 0, addr, addrlen);
     if (i != sizeof(md))
     {
-        LOG_ERROR("failed to send ack! %s", strerror(errno));
+        LOG_ERROR("failed to send ack, %d! %s", i, strerror(errno));
     }
     ASSERT(inet_ntop(AF_INET, &(addr_in->sin_addr), ip, sizeof(ip)));
     LOG_DEBUG("ack sent to %s:%d", ip, ntohs(addr_in->sin_port));
@@ -214,15 +218,21 @@ int usock_broadcast(usock * sock, const char *buf, size_t len, int flags)
 }
 
 int usock_recv(usock * sock, char * buf, size_t len, int flags)
-{
+{ 
+    ASSERT(sock);
+    ASSERT(buf);
+    if (len < CHUNK_SIZE)
+    {
+        LOG_ERROR("buf too small! need at least CHUNK_SIZE %d", CHUNK_SIZE);
+        return NG;
+    }
+
     int i = 0;
     int broadcasting = 0;
-    struct sockaddr_in src_addr;
 
     struct sockaddr_in localaddr;
     char cmbuf[100];
-    struct iovec iov[1];
-
+    struct iovec iov[2];
     struct msghdr mh =
     {
         .msg_name = &localaddr,
@@ -230,45 +240,45 @@ int usock_recv(usock * sock, char * buf, size_t len, int flags)
         .msg_control = cmbuf,
         .msg_controllen = sizeof(cmbuf),
         .msg_iov = iov,
-        .msg_iovlen = 1
+        .msg_iovlen = 2
     };
-
-    ASSERT(sock);
-    ASSERT(buf);
-
-    if (len < CHUNK_SIZE)
-    {
-        LOG_ERROR("buf too small! need at least CHUNK_SIZE %d", CHUNK_SIZE);
-        return NG;
-    }
-
-    iov[0].iov_base = buf;
-    iov[0].iov_len = len;
+    header head;
+    iov[0].iov_base =  &head;
+    iov[0].iov_len = sizeof(header);
+    iov[1].iov_base = buf;
+    iov[1].iov_len = len;
 
     while (1)
     {
-#if 0
-        i = recvfrom(sock->rxsock, buf, len, flags, (struct sockaddr *)&src_addr, &addrlen);
-#else
         i = recvmsg(sock->rxsock, &mh, 0 );
-#endif
-
         if (i < 0)
         {
             LOG_ERROR("select recv fail. %s", strerror(errno));
             continue;
         }
-
-        if (i > CHUNK_SIZE)
+        if (i > CHUNK_SIZE+MSG_HEAD_LEN)
         {
             LOG_ERROR("got something wrong? drop it.");
             continue;
         }
-#if 1
-        cmbuf[i]=0;
         hexdump("recvmsg got data", buf, i);
 
-        // interate the msg
+        LOG_DEBUG("total data bytes:%d",i);
+        LOG_DEBUG("the seq is %d",head.seq);
+        LOG_DEBUG("other in head %c%c%c%c %c%c%c%c",head.other[0],head.other[1],head.other[2],head.other[3],head.other[4],head.other[5],head.other[6],head.other[7]);
+        buf[i-12]='\0';
+        LOG_DEBUG("the message body is %s",buf);
+    
+        //LOG_DEBUG("the message body is %c",buf[0]);
+        //check the seq in header
+        if(head.seq!=nextseq){
+            LOG_ERROR("old message, drop it.");
+            __send_ack(sock, &head, buf, i, (struct sockaddr *)&localaddr, sizeof(localaddr));
+            continue;
+        }
+        nextseq++;
+
+        // to judge whether the message is broadcast
         struct cmsghdr *cmsg ;
         for (cmsg = CMSG_FIRSTHDR( &mh );
              cmsg != NULL;
@@ -280,7 +290,6 @@ int usock_recv(usock * sock, char * buf, size_t len, int flags)
             {
                 continue;
             }
-
             struct in_pktinfo * pi = (struct in_pktinfo *)CMSG_DATA(cmsg);
             // struct in_pktinfo {
             //     unsigned int   ipi_ifindex;  /* Interface index */
@@ -289,16 +298,17 @@ int usock_recv(usock * sock, char * buf, size_t len, int flags)
             //                                     address */
             // };
             struct in_addr * ipaddr = (struct in_addr *)&(pi->ipi_addr);
-
+            #if 0
             /* save peer addr in order to send ack */
             src_addr.sin_family = AF_INET;
             src_addr.sin_addr.s_addr = pi->ipi_spec_dst.s_addr;//inet_addr("172.26.121.106");//
             src_addr.sin_port = htons(MASTER_TXPORT);
 
             LOG_DEBUG("pi->ipi_spec_dst.s_addr %08x", pi->ipi_spec_dst.s_addr);
+            #endif
             char src_ip[128];
             //RecvAddr.sin_addr.S_un.S_un_b.s_b4 = (char)1
-            if (!inet_ntop(AF_INET, &(src_addr.sin_addr), src_ip, sizeof(src_ip)))
+            if (!inet_ntop(AF_INET, &(localaddr.sin_addr), src_ip, sizeof(src_ip)))
             {
                 LOG_ERROR("unable to get udp's src_ip!");
                 break;
@@ -314,19 +324,18 @@ int usock_recv(usock * sock, char * buf, size_t len, int flags)
             }
             break;
         }
-#endif
 
         if (!broadcasting)
         {
             /* do not send ack for broadcasting msg */
-            sleep(1);
-            __send_ack(sock, buf, i, (struct sockaddr *)&src_addr, sizeof(src_addr));
+            //sleep(1);
+            __send_ack(sock, &head, buf, i-MSG_HEAD_LEN, (struct sockaddr *)&localaddr, sizeof(localaddr));
         }
         break;
     }
 
 
-    return i;
+    return i-MSG_HEAD_LEN;
 }
 
 

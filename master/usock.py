@@ -1,7 +1,9 @@
+#!/usr/bin/env python3
 import socket
 import hashlib
 import struct
 import threading
+import time
 
 class USock():
 	"""
@@ -13,7 +15,7 @@ class USock():
 	RXPORT , receive data, reply ack
 	"""
 	HEAD_SIZE = 12
-	CHUNK_SIZE = 500
+	CHUNK_SIZE = 50
 	MASTER_TXPORT = 65071
 	MASTER_RXPORT = 65072
 	AGENT_TXPORT = 65171
@@ -51,33 +53,43 @@ class USock():
 		self.__expect_ack = chksum
 		while True:
 			print("expecting ack ", chksum, "from", addr)
-			self.txsock.settimeout(3)
-			data, sender = self.txsock.recvfrom(self.CHUNK_SIZE)
-			self.txsock.settimeout(None)
+			try:
+				self.txsock.settimeout(3)
+				data, sender = self.txsock.recvfrom(self.CHUNK_SIZE)
+				print("receive an ack!")
+				self.txsock.settimeout(None)
+			except Exception as e:
+				print(e)
+				return False
+			finally:
+				self.txsock.settimeout(None)
+
 			if data == chksum:
 				print("got ack!", data)
 				self.__expect_ack = None
 				return True
-			else:
-				print("invalid ack!", data)
-		return False
+			#else:
+			#	print("invalid ack!", data)
+			#	return False
 
 	def __send(self, data, addr, txsock=None, maxretry = 5):
 		""" reliable transmit """
 		retry = 0
 		txsock = self.txsock if not txsock else txsock
 		while retry < maxretry:
-			head = struct.pack("Icccccccc", self.txseq, bytes(str(retry).encode("utf-8")),
-				b"0",b"0",b"0",b"0",b"0",b"0",b"0")
+			#head = struct.pack("Icccccccc", self.txseq, bytes(str(retry).encode("utf-8")),
+			#	b"0",b"0",b"0",b"0",b"0",b"0",b"0")
+			head = struct.pack("Icccccccc", self.txseq, b"0",b"0",b"0",b"0",b"0",b"0",b"0",b"0")
 			txsock.sendto(head+data, addr)
 			m = hashlib.md5()
 			m.update(head)
 			m.update(data)
 			if self.__wait_ack(m.digest(), addr):
-				self.txseq = self.txseq + len(data)
+				#self.txseq = self.txseq + len(data)
+				self.txseq = self.txseq + 1
 				return True
-			else:
-				sleep(1)
+			else:	
+				time.sleep(1)
 				retry = retry + 1
 		else:
 			print("failed to send data chunk to ", str(addr))
@@ -144,11 +156,13 @@ class USock():
 
 if __name__ == "__main__":
 	print("test usock")
-	import json
+	#import json
 	sock = USock()
-	sock.broadcast(json.dumps({"1":"a","2":"B"}).encode("utf8"))
+	#sock.broadcast(json.dumps({"1":"a","2":"B"}).encode("utf8"))
 
-	sock.sendto(b"are you ok?", ("127.0.0.1", sock.AGENT_RXPORT))
+	#sock.sendto(b"are you ok?", ("127.0.0.1", sock.AGENT_RXPORT))
+	sock.sendto(b"abc", ("172.26.121.106", sock.AGENT_RXPORT))
+	#sock.broadcast(b"are you ok?")
 
-	data, addr = sock.recv()
-	print(data, addr)
+	#data, addr = sock.recv()
+	#print(data, addr)
